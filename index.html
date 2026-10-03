@@ -300,7 +300,7 @@
     let synced = false;       // received the first snapshot
     const state = { scores: { riccardo: 0, asia: 0 } };
 
-    const clamp = (v) => Math.min(TARGET, Math.max(0, Number(v) || 0));
+    const clamp = (v) => Math.min(TARGET, Number(v) || 0);
 
     // ---------- Auth ----------
     async function sha256(text) {
@@ -430,13 +430,13 @@
         const v = state.scores[p.id];
         const e = els[p.id];
         e.score.textContent = synced ? v : '–';
-        e.bar.style.width = (v / TARGET) * 100 + '%';
+        e.bar.style.width = Math.max(0, v / TARGET) * 100 + '%';
         e.toGo.textContent = !synced ? '' : v >= TARGET ? 'Ha vinto!' : `ne mancano ${TARGET - v}`;
         e.card.classList.toggle('winner', w === p.id);
         e.card.classList.toggle('loser', !!w && w !== p.id);
         // Once the contest is over, only allow going down (to fix mistakes) or resetting.
         e.card.querySelectorAll('.act.plus').forEach(b => b.disabled = !synced || !!w);
-        e.card.querySelectorAll('.act.minus').forEach(b => b.disabled = !synced || v === 0);
+        e.card.querySelectorAll('.act.minus').forEach(b => b.disabled = !synced);
         e.card.querySelector('.reset').disabled = !synced;
       }
       $('winnerBanner').hidden = !w;
