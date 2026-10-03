@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14121f">
+  <meta name="robots" content="noindex">
+  <title>Contest Counter</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>">
+  <style>
+    :root {
+      --bg: #14121f;
+      --bg-2: #1d1a2e;
+      --card: #24203a;
+      --line: #3a3456;
+      --text: #f4f2ff;
+      --muted: #a39dc4;
+      --ric: #4f8cff;
+      --ric-soft: rgba(79, 140, 255, .16);
+      --asia: #ff5c9a;
+      --asia-soft: rgba(255, 92, 154, .16);
+      --gold: #ffc940;
+      --danger: #ff5d5d;
+      --radius: 20px;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: radial-gradient(1200px 600px at 50% -200px, #2b2550 0%, var(--bg) 60%) fixed, var(--bg);
+      color: var(--text);
+      min-height: 100dvh;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    button { font: inherit; color: inherit; cursor: pointer; border: 0; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+    button:disabled { opacity: .35; cursor: not-allowed; }
+    [hidden] { display: none !important; }
+
+    /* ---------- Login ---------- */
+    .login {
+      position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; z-index: 50;
+      background: rgba(10, 8, 20, .7); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    }
+    .login-card {
+      width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 28px 22px; text-align: center;
+      box-shadow: 0 30px 80px rgba(0,0,0,.5); animation: pop .35s cubic-bezier(.2,1.4,.4,1);
+    }
+    .login-card .lock { font-size: 44px; line-height: 1; }
+    .login-card h1 { margin: 12px 0 4px; font-size: 22px; }
+    .login-card p { margin: 0 0 20px; color: var(--muted); font-size: 15px; }
+    .login-card input {
+      width: 100%; padding: 14px 16px; font-size: 17px; border-radius: 14px; outline: none;
+      background: var(--bg-2); color: var(--text); border: 2px solid var(--line);
+    }
+    .login-card input:focus { border-color: var(--ric); }
+    .login-card .error { color: var(--danger); font-size: 14px; min-height: 20px; margin: 8px 0 4px; }
+    .btn-primary {
+      width: 100%; padding: 14px; font-size: 17px; font-weight: 700; border-radius: 14px;
+      background: linear-gradient(135deg, var(--ric), var(--asia)); color: #fff;
+    }
+    .btn-primary:active { transform: scale(.98); }
+    .shake { animation: shake .4s; }
+
+    /* ---------- App ---------- */
+    .app { max-width: 960px; margin: 0 auto; padding: 20px 16px 32px; }
+    header { text-align: center; margin-bottom: 18px; }
+    header h1 { margin: 0; font-size: clamp(24px, 6vw, 34px); letter-spacing: -.5px; }
+    header p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+
+    .board { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 640px) { .board { grid-template-columns: 1fr; gap: 14px; } }
+
+    .player {
+      --c: var(--ric); --c-soft: var(--ric-soft);
+      position: relative; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 18px 16px 16px; overflow: hidden; transition: box-shadow .3s, border-color .3s;
+    }
+    .player.asia { --c: var(--asia); --c-soft: var(--asia-soft); }
+    .player::before {
+      content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--c);
+    }
+    .player.winner { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold), 0 0 40px rgba(255, 201, 64, .35); }
+    .player.loser { opacity: .55; }
+
+    .player-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .player-name { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 800; }
+    .avatar {
+      width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 800;
+      background: var(--c-soft); color: var(--c); font-size: 18px;
+    }
+    .crown { font-size: 22px; display: none; }
+    .player.winner .crown { display: inline; animation: bob 1.2s ease-in-out infinite; }
+    .to-go { font-size: 13px; color: var(--muted); white-space: nowrap; }
+
+    .score {
+      text-align: center; font-size: clamp(76px, 22vw, 120px); font-weight: 900; line-height: 1;
+      margin: 14px 0 6px; font-variant-numeric: tabular-nums; color: var(--c);
+    }
+    .score.bump { animation: bump .25s ease-out; }
+    .target { text-align: center; color: var(--muted); font-size: 14px; margin-bottom: 12px; }
+
+    .bar { height: 10px; border-radius: 99px; background: var(--bg-2); overflow: hidden; margin-bottom: 16px; }
+    .bar > span { display: block; height: 100%; width: 0; background: var(--c); border-radius: inherit; transition: width .35s cubic-bezier(.3,1.3,.5,1); }
+    .player.winner .bar > span { background: var(--gold); }
+
+    .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .act {
+      padding: 16px 0; font-size: 20px; font-weight: 800; border-radius: 14px; min-height: 56px;
+      font-variant-numeric: tabular-nums; transition: transform .08s, filter .15s;
+    }
+    .act:active:not(:disabled) { transform: scale(.94); }
+    .act.plus { background: var(--c); color: #fff; }
+    .act.minus { background: var(--c-soft); color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); }
+    .reset {
+      margin-top: 12px; width: 100%; padding: 13px; font-size: 15px; font-weight: 700; border-radius: 14px;
+      background: transparent; color: var(--muted); border: 1px dashed var(--line);
+    }
+    .reset:active { background: var(--bg-2); }
+
+    .footer-actions { display: flex; justify-content: center; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+    .ghost {
+      padding: 10px 16px; border-radius: 99px; background: var(--bg-2); border: 1px solid var(--line);
+      color: var(--muted); font-size: 14px; font-weight: 600;
+    }
+
+    /* ---------- Modals ---------- */
+    .modal {
+      position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px;
+      background: rgba(10, 8, 20, .72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      animation: fade .2s;
+    }
+    .modal-card {
+      width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 24px 20px 20px; text-align: center; animation: pop .3s cubic-bezier(.2,1.4,.4,1);
+    }
+    .modal-card h2 { margin: 6px 0 8px; font-size: 21px; }
+    .modal-card p { margin: 0 0 20px; color: var(--muted); font-size: 15px; line-height: 1.4; }
+    .modal-icon { font-size: 40px; }
+    .modal-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .modal-btns button { padding: 14px; border-radius: 14px; font-weight: 700; font-size: 16px; }
+    .btn-cancel { background: var(--bg-2); border: 1px solid var(--line) !important; }
+    .btn-danger { background: var(--danger); color: #fff; }
+
+    /* ---------- Win screen ---------- */
+    .win {
+      position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 16px;
+      background: radial-gradient(circle at 50% 40%, rgba(70, 52, 10, .97), rgba(12, 10, 22, .98) 65%);
+      animation: fade .3s;
+    }
+    .win-card { text-align: center; max-width: 420px; width: 100%; position: relative; z-index: 2; }
+    .trophy { font-size: clamp(110px, 32vw, 160px); line-height: 1; animation: trophy 1s cubic-bezier(.2,1.6,.4,1) both, glow 2s ease-in-out 1s infinite; display: inline-block; }
+    .win-card .label { margin-top: 10px; color: var(--gold); letter-spacing: 4px; font-weight: 800; font-size: 14px; text-transform: uppercase; }
+    .win-card .who { font-size: clamp(44px, 14vw, 72px); font-weight: 900; margin: 4px 0; line-height: 1.05; animation: pop .6s .3s cubic-bezier(.2,1.6,.4,1) both; }
+    .win-card .final { color: var(--muted); font-size: 17px; margin-bottom: 26px; }
+    .win-card .final b { color: var(--text); font-variant-numeric: tabular-nums; }
+    .win-btns { display: grid; gap: 10px; }
+    .win-btns .btn-primary { background: linear-gradient(135deg, #ffb300, var(--gold)); color: #2a1d00; }
+    .win-btns .ghost { padding: 13px; border-radius: 14px; font-size: 15px; }
+
+    .winner-banner {
+      display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+      background: linear-gradient(135deg, rgba(255, 201, 64, .18), rgba(255, 201, 64, .06));
+      border: 1px solid rgba(255, 201, 64, .5); color: var(--gold);
+      border-radius: 14px; padding: 12px 14px; margin-bottom: 16px; font-weight: 700; text-align: center;
+    }
+    .winner-banner button { background: var(--gold); color: #2a1d00; padding: 8px 14px; border-radius: 99px; font-weight: 800; font-size: 14px; }
+
+    #confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 80; }
+
+    @keyframes pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.12); } 100% { transform: scale(1); } }
+    @keyframes shake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-10px); } 40%,80% { transform: translateX(10px); } }
+    @keyframes bob { 0%,100% { transform: translateY(0) rotate(-8deg); } 50% { transform: translateY(-4px) rotate(8deg); } }
+    @keyframes trophy { from { transform: scale(0) rotate(-30deg); } to { transform: scale(1) rotate(0); } }
+    @keyframes glow { 0%,100% { filter: drop-shadow(0 0 12px rgba(255,201,64,.5)); } 50% { filter: drop-shadow(0 0 34px rgba(255,201,64,.95)); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+
+  <!-- Password gate -->
+  <div class="login" id="login">
+    <form class="login-card" id="loginForm" autocomplete="off">
+      <div class="lock">🔒</div>
+      <h1>Contest Counter</h1>
+      <p>Inserisci la password per entrare</p>
+      <input id="pwd" type="password" inputmode="text" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Password" aria-label="Password" required>
+      <div class="error" id="loginError" role="alert"></div>
+      <button class="btn-primary" type="submit">Entra</button>
+    </form>
+  </div>
+
+  <!-- Main app -->
+  <main class="app" id="app" hidden>
+    <header>
+      <h1>🏁 Riccardo vs Asia</h1>
+      <p>Il primo che arriva a <b id="targetLabel">30</b> vince</p>
+    </header>
+
+    <div class="winner-banner" id="winnerBanner" hidden>
+      <span id="winnerBannerText">🏆</span>
+      <button type="button" id="newContestBtn">Nuova sfida</button>
+    </div>
+
+    <section class="board" id="board"></section>
+
+    <div class="footer-actions">
+      <button class="ghost" type="button" id="resetAllBtn">↺ Azzera tutto</button>
+      <button class="ghost" type="button" id="logoutBtn">🔒 Esci</button>
+    </div>
+  </main>
+
+  <!-- Confirm modal -->
+  <div class="modal" id="confirm" hidden role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="modal-card">
+      <div class="modal-icon">⚠️</div>
+      <h2 id="confirmTitle">Sei sicuro?</h2>
+      <p id="confirmText"></p>
+      <div class="modal-btns">
+        <button class="btn-cancel" type="button" id="confirmNo">Annulla</button>
+        <button class="btn-danger" type="button" id="confirmYes">Azzera</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Win screen -->
+  <div class="win" id="win" hidden role="dialog" aria-modal="true" aria-labelledby="winWho">
+    <div class="win-card">
+      <div class="trophy">🏆</div>
+      <div class="label">Vincitore</div>
+      <div class="who" id="winWho"></div>
+      <div class="final" id="winFinal"></div>
+      <div class="win-btns">
+        <button class="btn-primary" type="button" id="winNew">🔁 Nuova sfida</button>
+        <button class="ghost" type="button" id="winClose">Chiudi</button>
+      </div>
+    </div>
+  </div>
+
+  <canvas id="confetti"></canvas>
+
+  <template id="playerTpl">
+    <article class="player">
+      <div class="player-head">
+        <div class="player-name"><span class="avatar"></span><span class="name"></span><span class="crown">👑</span></div>
+        <div class="to-go"></div>
+      </div>
+      <div class="score" aria-live="polite">0</div>
+      <div class="target">su 30</div>
+      <div class="bar"><span></span></div>
+      <div class="actions">
+        <button class="act plus"  type="button" data-d="1">+1</button>
+        <button class="act plus"  type="button" data-d="4">+4</button>
+        <button class="act plus"  type="button" data-d="10">+10</button>
+        <button class="act minus" type="button" data-d="-1">−1</button>
+        <button class="act minus" type="button" data-d="-4">−4</button>
+        <button class="act minus" type="button" data-d="-10">−10</button>
+      </div>
+      <button class="reset" type="button">↺ Reset</button>
+    </article>
+  </template>
+
+  <script>
+  (() => {
+    const TARGET = 30;
+    // SHA-256 of the password, so it isn't readable in the page source.
+    const PWD_HASH = 'fd8e395565b482e136b73012980a06c8aec0354ec58891c8b0bd4ede335cc56a';
+    const STATE_KEY = 'contest-counter:v1';
+    const AUTH_KEY = 'contest-counter:auth';
+    const PLAYERS = [
+      { id: 'riccardo', name: 'Riccardo', cls: 'riccardo' },
+      { id: 'asia', name: 'Asia', cls: 'asia' },
+    ];
+
+    const $ = (id) => document.getElementById(id);
+
+    // ---------- Storage (fails soft, e.g. private mode) ----------
+    const store = {
+      get(k, s = localStorage) { try { return s.getItem(k); } catch { return null; } },
+      set(k, v, s = localStorage) { try { s.setItem(k, v); } catch {} },
+      del(k, s = localStorage) { try { s.removeItem(k); } catch {} },
+    };
+
+    function loadState() {
+      const fresh = { scores: { riccardo: 0, asia: 0 } };
+      try {
+        const s = JSON.parse(store.get(STATE_KEY));
+        if (s && s.scores) {
+          for (const p of PLAYERS) fresh.scores[p.id] = Math.min(TARGET, Math.max(0, Number(s.scores[p.id]) || 0));
+        }
+      } catch {}
+      return fresh;
+    }
+    const state = loadState();
+    const save = () => store.set(STATE_KEY, JSON.stringify(state));
+
+    // ---------- Auth ----------
+    async function sha256(text) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+      return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function unlock() {
+      $('login').hidden = true;
+      $('app').hidden = false;
+      render(false);
+    }
+
+    $('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = $('pwd');
+      const ok = (await sha256(input.value.trim().toLowerCase())) === PWD_HASH;
+      if (ok) {
+        store.set(AUTH_KEY, PWD_HASH, sessionStorage);
+        input.blur();
+        unlock();
+      } else {
+        $('loginError').textContent = 'Password errata, riprova';
+        const card = $('loginForm');
+        card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake');
+        input.select();
+        if (navigator.vibrate) navigator.vibrate(120);
+      }
+    });
+
+    $('logoutBtn').addEventListener('click', () => {
+      store.del(AUTH_KEY, sessionStorage);
+      $('pwd').value = '';
+      $('loginError').textContent = '';
+      $('app').hidden = true;
+      $('login').hidden = false;
+      $('pwd').focus();
+    });
+
+    // ---------- Board ----------
+    const els = {};
+    const tpl = $('playerTpl');
+    for (const p of PLAYERS) {
+      const node = tpl.content.firstElementChild.cloneNode(true);
+      node.classList.add(p.cls);
+      node.querySelector('.name').textContent = p.name;
+      node.querySelector('.avatar').textContent = p.name[0];
+      node.querySelector('.target').textContent = `su ${TARGET}`;
+      node.querySelectorAll('.act').forEach(btn =>
+        btn.addEventListener('click', () => change(p.id, Number(btn.dataset.d))));
+      node.querySelector('.reset').addEventListener('click', () =>
+        ask(`Il punteggio di ${p.name} tornerà a 0.`, () => setScore(p.id, 0)));
+      $('board').appendChild(node);
+      els[p.id] = {
+        card: node,
+        score: node.querySelector('.score'),
+        bar: node.querySelector('.bar > span'),
+        toGo: node.querySelector('.to-go'),
+      };
+    }
+    $('targetLabel').textContent = TARGET;
+
+    const winnerId = () => PLAYERS.find(p => state.scores[p.id] >= TARGET)?.id || null;
+
+    function change(id, delta) {
+      setScore(id, Math.min(TARGET, Math.max(0, state.scores[id] + delta)));
+      if (navigator.vibrate) navigator.vibrate(15);
+    }
+
+    function setScore(id, value) {
+      const before = winnerId();
+      state.scores[id] = value;
+      save();
+      const after = winnerId();
+      render(true, id);
+      if (after && after !== before) celebrate(after);
+    }
+
+    function render(animate, changedId) {
+      const w = winnerId();
+      for (const p of PLAYERS) {
+        const v = state.scores[p.id];
+        const e = els[p.id];
+        e.score.textContent = v;
+        e.bar.style.width = Math.min(100, (v / TARGET) * 100) + '%';
+        e.toGo.textContent = v >= TARGET ? 'Ha vinto!' : `ne mancano ${TARGET - v}`;
+        e.card.classList.toggle('winner', w === p.id);
+        e.card.classList.toggle('loser', !!w && w !== p.id);
+        // Once the contest is over, only allow going down (to fix mistakes) or resetting.
+        e.card.querySelectorAll('.act.plus').forEach(b => b.disabled = !!w);
+        e.card.querySelectorAll('.act.minus').forEach(b => b.disabled = v === 0);
+        if (animate && changedId === p.id) {
+          e.score.classList.remove('bump'); void e.score.offsetWidth; e.score.classList.add('bump');
+        }
+      }
+      $('winnerBanner').hidden = !w;
+      if (w) $('winnerBannerText').textContent = `🏆 ${nameOf(w)} ha vinto la sfida!`;
+    }
+
+    const nameOf = (id) => PLAYERS.find(p => p.id === id).name;
+
+    // ---------- Confirm ----------
+    let onConfirm = null;
+    function ask(text, cb, yesLabel = 'Azzera') {
+      $('confirmText').textContent = text;
+      $('confirmYes').textContent = yesLabel;
+      onConfirm = cb;
+      $('confirm').hidden = false;
+      $('confirmNo').focus();
+    }
+    const closeConfirm = () => { $('confirm').hidden = true; onConfirm = null; };
+    $('confirmNo').addEventListener('click', closeConfirm);
+    $('confirm').addEventListener('click', (e) => { if (e.target.id === 'confirm') closeConfirm(); });
+    $('confirmYes').addEventListener('click', () => { const cb = onConfirm; closeConfirm(); cb && cb(); });
+
+    function resetAll() {
+      for (const p of PLAYERS) state.scores[p.id] = 0;
+      save();
+      render(false);
+    }
+    const askResetAll = () => ask('Entrambi i punteggi torneranno a 0.', resetAll, 'Azzera tutto');
+    $('resetAllBtn').addEventListener('click', askResetAll);
+    $('newContestBtn').addEventListener('click', askResetAll);
+
+    // ---------- Win ----------
+    function celebrate(id) {
+      const p = PLAYERS.find(x => x.id === id);
+      const other = PLAYERS.find(x => x.id !== id);
+      const who = $('winWho');
+      who.textContent = p.name;
+      who.style.color = getComputedStyle(document.documentElement).getPropertyValue(id === 'asia' ? '--asia' : '--ric');
+      $('winFinal').innerHTML = `${p.name} <b>${state.scores[id]}</b> – <b>${state.scores[other.id]}</b> ${other.name}`;
+      $('win').hidden = false;
+      if (navigator.vibrate) navigator.vibrate([100, 60, 100, 60, 250]);
+      confetti();
+    }
+    $('winClose').addEventListener('click', () => { $('win').hidden = true; });
+    $('winNew').addEventListener('click', () => { $('win').hidden = true; askResetAll(); });
+
+    // Lightweight canvas confetti
+    function confetti() {
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const c = $('confetti'), ctx = c.getContext('2d');
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const W = c.width = innerWidth * dpr, H = c.height = innerHeight * dpr;
+      const colors = ['#ffc940', '#4f8cff', '#ff5c9a', '#7cf0b0', '#ffffff', '#b38cff'];
+      const parts = [];
+      const burst = (x, n) => {
+        for (let i = 0; i < n; i++) {
+          const a = -Math.PI / 2 + (Math.random() - .5) * 1.4;
+          const s = (8 + Math.random() * 12) * dpr;
+          parts.push({
+            x, y: H, vx: Math.cos(a) * s, vy: Math.sin(a) * s * 1.35,
+            w: (6 + Math.random() * 6) * dpr, h: (8 + Math.random() * 10) * dpr,
+            r: Math.random() * Math.PI, vr: (Math.random() - .5) * .3,
+            col: colors[(Math.random() * colors.length) | 0], life: 0,
+          });
+        }
+      };
+      burst(W * .15, 120); burst(W * .85, 120);
+      setTimeout(() => burst(W * .5, 140), 450);
+      setTimeout(() => { burst(W * .3, 90); burst(W * .7, 90); }, 1000);
+      const start = performance.now();
+      (function frame(t) {
+        ctx.clearRect(0, 0, W, H);
+        for (const q of parts) {
+          q.vy += .28 * dpr; q.vx *= .99; q.vy *= .99;
+          q.x += q.vx; q.y += q.vy; q.r += q.vr; q.life++;
+          ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.r);
+          ctx.fillStyle = q.col;
+          ctx.fillRect(-q.w / 2, -q.h / 2, q.w, q.h * Math.abs(Math.cos(q.life * .1)));
+          ctx.restore();
+        }
+        if (t - start < 5500) requestAnimationFrame(frame);
+        else ctx.clearRect(0, 0, W, H);
+      })(start);
+    }
+
+    // ---------- Boot ----------
+    if (store.get(AUTH_KEY, sessionStorage) === PWD_HASH) unlock();
+    else setTimeout(() => $('pwd').focus(), 50);
+
+    window.addEventListener('storage', (e) => {
+      if (e.key === STATE_KEY) { Object.assign(state, loadState()); render(false); }
+    });
+  })();
+  </script>
+</body>
+</html>
