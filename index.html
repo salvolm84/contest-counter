@@ -124,6 +124,13 @@
       color: var(--muted); font-size: 14px; font-weight: 600;
     }
 
+    .status {
+      display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 4px 10px;
+      border-radius: 99px; background: var(--bg-2); border: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 600;
+    }
+    .status i { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+    .status.online i { background: #3ddc84; box-shadow: 0 0 8px #3ddc84; }
+
     /* ---------- Modals ---------- */
     .modal {
       position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px;
@@ -197,6 +204,7 @@
     <header>
       <h1>🏁 Riccardo vs Asia</h1>
       <p>Il primo che arriva a <b id="targetLabel">30</b> vince</p>
+      <div class="status" id="status"><i></i><span id="statusText">Connessione…</span></div>
     </header>
 
     <div class="winner-banner" id="winnerBanner" hidden>
@@ -262,39 +270,37 @@
     </article>
   </template>
 
-  <script>
-  (() => {
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
+    import { getDatabase, ref, get, set, onValue, runTransaction } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-database.js';
+
+    // Realtime Database URL from the Firebase console (Build → Realtime Database).
+    const DATABASE_URL = 'https://test1-c25b9-default-rtdb.europe-west1.firebasedatabase.app';
+
     const TARGET = 30;
-    // SHA-256 of the password, so it isn't readable in the page source.
-    const PWD_HASH = 'fd8e395565b482e136b73012980a06c8aec0354ec58891c8b0bd4ede335cc56a';
-    const STATE_KEY = 'contest-counter:v1';
-    const AUTH_KEY = 'contest-counter:auth';
+    // The password is never stored here: it is hashed into the database key, and
+    // the database rules only allow access to the key derived from the right one.
+    const SALT = 'contest-counter:';
+    const AUTH_KEY = 'contest-counter:room';
     const PLAYERS = [
       { id: 'riccardo', name: 'Riccardo', cls: 'riccardo' },
       { id: 'asia', name: 'Asia', cls: 'asia' },
     ];
 
     const $ = (id) => document.getElementById(id);
-
-    // ---------- Storage (fails soft, e.g. private mode) ----------
-    const store = {
-      get(k, s = localStorage) { try { return s.getItem(k); } catch { return null; } },
-      set(k, v, s = localStorage) { try { s.setItem(k, v); } catch {} },
-      del(k, s = localStorage) { try { s.removeItem(k); } catch {} },
+    const session = {
+      get() { try { return sessionStorage.getItem(AUTH_KEY); } catch { return null; } },
+      set(v) { try { sessionStorage.setItem(AUTH_KEY, v); } catch {} },
+      del() { try { sessionStorage.removeItem(AUTH_KEY); } catch {} },
     };
 
-    function loadState() {
-      const fresh = { scores: { riccardo: 0, asia: 0 } };
-      try {
-        const s = JSON.parse(store.get(STATE_KEY));
-        if (s && s.scores) {
-          for (const p of PLAYERS) fresh.scores[p.id] = Math.min(TARGET, Math.max(0, Number(s.scores[p.id]) || 0));
-        }
-      } catch {}
-      return fresh;
-    }
-    const state = loadState();
-    const save = () => store.set(STATE_KEY, JSON.stringify(state));
+    const db = DATABASE_URL ? getDatabase(initializeApp({ databaseURL: DATABASE_URL })) : null;
+    let room = null;          // database key for this contest
+    let unsubscribe = null;
+    let synced = false;       // received the first snapshot
+    const state = { scores: { riccardo: 0, asia: 0 } };
+
+    const clamp = (v) => Math.min(TARGET, Math.max(0, Number(v) || 0));
 
     // ---------- Auth ----------
     async function sha256(text) {
@@ -302,37 +308,82 @@
       return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
-    function unlock() {
-      $('login').hidden = true;
-      $('app').hidden = false;
-      render(false);
+    // Reading the room succeeds only with the right key; the rules deny every other path.
+    async function canOpen(key) {
+      try { await get(ref(db, `contests/${key}`)); return true; }
+      catch (e) { if (/permission/i.test(e.message)) return false; throw e; }
+    }
+
+    function showLoginError(msg) {
+      $('loginError').textContent = msg;
+      const card = $('loginForm');
+      card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake');
+      $('pwd').select();
+      if (navigator.vibrate) navigator.vibrate(120);
     }
 
     $('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const input = $('pwd');
-      const ok = (await sha256(input.value.trim().toLowerCase())) === PWD_HASH;
-      if (ok) {
-        store.set(AUTH_KEY, PWD_HASH, sessionStorage);
-        input.blur();
-        unlock();
-      } else {
-        $('loginError').textContent = 'Password errata, riprova';
-        const card = $('loginForm');
-        card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake');
-        input.select();
-        if (navigator.vibrate) navigator.vibrate(120);
+      if (!db) return showLoginError('Database non configurato');
+      const btn = $('loginForm').querySelector('button');
+      btn.disabled = true;
+      $('loginError').textContent = '';
+      try {
+        const key = await sha256(SALT + $('pwd').value.trim().toLowerCase());
+        if (await canOpen(key)) {
+          session.set(key);
+          $('pwd').blur();
+          unlock(key);
+        } else {
+          showLoginError('Password errata, riprova');
+        }
+      } catch {
+        showLoginError('Connessione non riuscita, riprova');
+      } finally {
+        btn.disabled = false;
       }
     });
 
-    $('logoutBtn').addEventListener('click', () => {
-      store.del(AUTH_KEY, sessionStorage);
+    function unlock(key) {
+      room = key;
+      $('login').hidden = true;
+      $('app').hidden = false;
+      render(false);
+      let lastWinner;
+      unsubscribe = onValue(ref(db, `contests/${room}`), (snap) => {
+        const v = snap.val() || {};
+        for (const p of PLAYERS) state.scores[p.id] = clamp(v[p.id]);
+        const w = winnerId();
+        // Celebrate on every device when someone crosses the line, but not on page load.
+        if (synced && w && w !== lastWinner) celebrate(w);
+        if (!w) $('win').hidden = true;
+        lastWinner = w;
+        synced = true;
+        render(false);
+      }, () => lock());
+    }
+
+    function lock() {
+      if (unsubscribe) unsubscribe();
+      unsubscribe = null; room = null; synced = false;
+      session.del();
       $('pwd').value = '';
       $('loginError').textContent = '';
+      $('win').hidden = true;
       $('app').hidden = true;
       $('login').hidden = false;
       $('pwd').focus();
-    });
+    }
+    $('logoutBtn').addEventListener('click', lock);
+
+    // ---------- Connection status ----------
+    if (db) {
+      onValue(ref(db, '.info/connected'), (snap) => {
+        const on = snap.val() === true;
+        $('status').classList.toggle('online', on);
+        $('statusText').textContent = on ? 'Live' : 'Offline';
+      });
+    }
 
     // ---------- Board ----------
     const els = {};
@@ -346,7 +397,7 @@
       node.querySelectorAll('.act').forEach(btn =>
         btn.addEventListener('click', () => change(p.id, Number(btn.dataset.d))));
       node.querySelector('.reset').addEventListener('click', () =>
-        ask(`Il punteggio di ${p.name} tornerà a 0.`, () => setScore(p.id, 0)));
+        ask(`Il punteggio di ${p.name} tornerà a 0 per tutti.`, () => set(ref(db, `contests/${room}/${p.id}`), 0)));
       $('board').appendChild(node);
       els[p.id] = {
         card: node,
@@ -358,43 +409,39 @@
     $('targetLabel').textContent = TARGET;
 
     const winnerId = () => PLAYERS.find(p => state.scores[p.id] >= TARGET)?.id || null;
+    const nameOf = (id) => PLAYERS.find(p => p.id === id).name;
 
+    // A transaction, so taps from several phones at once all count.
     function change(id, delta) {
-      setScore(id, Math.min(TARGET, Math.max(0, state.scores[id] + delta)));
+      if (!room) return;
+      runTransaction(ref(db, `contests/${room}/${id}`), (v) => clamp((v || 0) + delta));
+      bump(id);
       if (navigator.vibrate) navigator.vibrate(15);
     }
 
-    function setScore(id, value) {
-      const before = winnerId();
-      state.scores[id] = value;
-      save();
-      const after = winnerId();
-      render(true, id);
-      if (after && after !== before) celebrate(after);
+    function bump(id) {
+      const s = els[id].score;
+      s.classList.remove('bump'); void s.offsetWidth; s.classList.add('bump');
     }
 
-    function render(animate, changedId) {
+    function render() {
       const w = winnerId();
       for (const p of PLAYERS) {
         const v = state.scores[p.id];
         const e = els[p.id];
-        e.score.textContent = v;
-        e.bar.style.width = Math.min(100, (v / TARGET) * 100) + '%';
-        e.toGo.textContent = v >= TARGET ? 'Ha vinto!' : `ne mancano ${TARGET - v}`;
+        e.score.textContent = synced ? v : '–';
+        e.bar.style.width = (v / TARGET) * 100 + '%';
+        e.toGo.textContent = !synced ? '' : v >= TARGET ? 'Ha vinto!' : `ne mancano ${TARGET - v}`;
         e.card.classList.toggle('winner', w === p.id);
         e.card.classList.toggle('loser', !!w && w !== p.id);
         // Once the contest is over, only allow going down (to fix mistakes) or resetting.
-        e.card.querySelectorAll('.act.plus').forEach(b => b.disabled = !!w);
-        e.card.querySelectorAll('.act.minus').forEach(b => b.disabled = v === 0);
-        if (animate && changedId === p.id) {
-          e.score.classList.remove('bump'); void e.score.offsetWidth; e.score.classList.add('bump');
-        }
+        e.card.querySelectorAll('.act.plus').forEach(b => b.disabled = !synced || !!w);
+        e.card.querySelectorAll('.act.minus').forEach(b => b.disabled = !synced || v === 0);
+        e.card.querySelector('.reset').disabled = !synced;
       }
       $('winnerBanner').hidden = !w;
       if (w) $('winnerBannerText').textContent = `🏆 ${nameOf(w)} ha vinto la sfida!`;
     }
-
-    const nameOf = (id) => PLAYERS.find(p => p.id === id).name;
 
     // ---------- Confirm ----------
     let onConfirm = null;
@@ -410,12 +457,8 @@
     $('confirm').addEventListener('click', (e) => { if (e.target.id === 'confirm') closeConfirm(); });
     $('confirmYes').addEventListener('click', () => { const cb = onConfirm; closeConfirm(); cb && cb(); });
 
-    function resetAll() {
-      for (const p of PLAYERS) state.scores[p.id] = 0;
-      save();
-      render(false);
-    }
-    const askResetAll = () => ask('Entrambi i punteggi torneranno a 0.', resetAll, 'Azzera tutto');
+    const resetAll = () => set(ref(db, `contests/${room}`), { riccardo: 0, asia: 0 });
+    const askResetAll = () => ask('Entrambi i punteggi torneranno a 0 per tutti.', resetAll, 'Azzera tutto');
     $('resetAllBtn').addEventListener('click', askResetAll);
     $('newContestBtn').addEventListener('click', askResetAll);
 
@@ -473,14 +516,12 @@
       })(start);
     }
 
-    // ---------- Boot ----------
-    if (store.get(AUTH_KEY, sessionStorage) === PWD_HASH) unlock();
-    else setTimeout(() => $('pwd').focus(), 50);
 
-    window.addEventListener('storage', (e) => {
-      if (e.key === STATE_KEY) { Object.assign(state, loadState()); render(false); }
-    });
-  })();
+    // ---------- Boot ----------
+    if (!db) $('loginError').textContent = 'Database non configurato';
+    const saved = session.get();
+    if (db && saved) unlock(saved);
+    else setTimeout(() => $('pwd').focus(), 50);
   </script>
 </body>
 </html>
